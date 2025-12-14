@@ -20,11 +20,11 @@ A lightweight, single-file EPUB reader with a beautiful Material Design 3 interf
 
 ## 🚀 Live Demo (在线演示)
 
-[👉 Click here to use the Reader](https://你的用户名.github.io/仓库名/)
+[👉 Click here to use the Reader](https://tsukinokiryo.github.io/Epub-Reader-web/)
 
 ## 🛠️ Usage (使用方法)
 
-1.  Open the [Demo Link](https://你的用户名.github.io/仓库名/) or download the `index.html` file.
+1.  Open the [Demo Link](https://tsukinokiryo.github.io/Epub-Reader-web/) or download the `index.html` file.
 2.  Click the **+** floating button (or "Open Book") to select a `.epub` file from your device.
 3.  Enjoy reading! 
     * **Bookmarks**: Long press the bookmark button to view/manage bookmarks.
