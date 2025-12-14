@@ -1,0 +1,1100 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Epub Reader</title>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@24,400,0,0" rel="stylesheet" />
+
+    <script src="https://unpkg.com/jszip@3.10.1/dist/jszip.min.js"></script>
+    <script src="https://unpkg.com/epubjs@0.3.93/dist/epub.min.js"></script>
+
+    <style>
+        :root {
+            /* 严格复原配色 (Purple Theme) */
+            --primary: #6750a4;
+            --on-primary: #ffffff;
+            --primary-container: #eaddff;
+            --on-primary-container: #21005d;
+            --secondary-container: #e8def8;
+            --on-secondary-container: #1d192b;
+            --surface: #fffbfe;
+            --surface-variant: #e7e0ec;
+            --on-surface: #1c1b1f;
+            --outline: #79747e;
+            --outline-variant: #cac4d0;
+            --error: #ba1a1a;
+            --on-error: #ffffff;
+            --error-container: #ffdad6;
+            --on-error-container: #410002;
+
+            --radius-lg: 24px;
+            --radius-xl: 28px;
+            --font-main: 'Roboto', sans-serif;
+            --easing-entrance: cubic-bezier(0.2, 0, 0, 1);
+        }
+
+        * { box-sizing: border-box; }
+        body { margin:0; padding:0; background-color:var(--surface); color:var(--on-surface); font-family:var(--font-main); height:100vh; display:flex; flex-direction:column; overflow:hidden; transition: background-color 0.4s, color 0.4s; user-select: none; -webkit-user-select: none; }
+        
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: var(--outline-variant); border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: var(--outline); }
+
+        /* A11y Focus Styles */
+        :focus-visible { outline: 3px solid var(--primary); outline-offset: 2px; }
+        .theme-btn:focus-visible { outline: 3px solid var(--on-surface); outline-offset: 2px; }
+        [role="button"], [tabindex="0"] { cursor: pointer; }
+
+        header{padding:12px 24px;height:64px;display:flex;align-items:center;justify-content:space-between; position: relative; z-index: 50;}
+        .app-title{font-size:20px;font-weight:500;color:var(--on-surface);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+        .icon-btn{width:48px;height:48px;border-radius:50%;border:none;background:transparent;color:var(--on-surface);cursor:pointer;display:flex;align-items:center;justify-content:center; transition: background-color 0.2s;}
+        .icon-btn:hover { background-color: var(--surface-variant); }
+
+        main{flex:1;margin:0 16px;background-color:var(--surface-variant);border-radius:var(--radius-lg);position:relative;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 2px 6px rgba(0,0,0,0.05); transition: background-color 0.4s;}
+        #viewer{flex:1;width:100%;height:100%;overflow:hidden;opacity:1;transition:opacity .4s ease;}
+        
+        .empty-state{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);text-align:center;color:var(--outline);display:flex;flex-direction:column;align-items:center;gap:12px;z-index:10; transition: opacity 0.3s;}
+        .loading-indicator{display:none;position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);color:var(--primary);font-weight:500;z-index:15;background:rgba(255,255,255,0.9);padding:12px 24px;border-radius:24px;box-shadow:0 2px 8px rgba(0,0,0,0.1)}
+        .nav-fade-overlay{position:absolute;inset:0;background:rgba(255,255,255,0.9);pointer-events:none;opacity:0;transition:opacity .5s ease;z-index:9}
+        .nav-fade-overlay.active{opacity:1}
+
+        footer{height:90px;display:flex;justify-content:center;align-items:center;gap:12px;padding-bottom:20px;position:relative;flex-shrink:0}
+        button{border:none;cursor:pointer;font-family:var(--font-main);outline:none; -webkit-tap-highlight-color: transparent;}
+        .material-chip{height:40px;border-radius:20px;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:500;box-shadow:0 1px 2px rgba(0,0,0,0.05)}
+        .nav-chip{padding:0 12px;background-color:var(--secondary-container);color:var(--on-secondary-container);min-width:56px;transition:all .2s; position: relative; overflow: hidden;}
+        .nav-chip:hover:not(:disabled){background-color:var(--primary-container);box-shadow:0 2px 4px rgba(0,0,0,0.15)}
+        .progress-chip{padding:0 16px 0 20px;background-color:var(--secondary-container);color:var(--on-secondary-container);gap:8px;max-width:350px;transition:all .2s}
+        .material-chip:disabled{background-color:var(--surface-variant);color:var(--outline);opacity:.6;box-shadow:none;cursor:not-allowed}
+        
+        /* Bookmark Specifics */
+        .bookmark-btn.active .material-symbols-rounded { font-variation-settings: 'FILL' 1; color: var(--primary); }
+        .nav-chip:active { transform: scale(0.95); }
+
+        .fab{position:fixed;bottom:40px;right:30px;height:56px;padding:0 24px 0 20px;background-color:var(--primary-container);color:var(--on-primary-container);border-radius:16px;font-weight:500;font-size:14px;letter-spacing:.5px;box-shadow:0 4px 8px rgba(0,0,0,0.15);gap:8px;z-index:20;display:flex;align-items:center;justify-content:center;transition:all .4s var(--easing-entrance);}
+        .fab:hover { box-shadow: 0 6px 12px rgba(0,0,0,0.2); transform: translateY(-2px); }
+        .fab.hidden { transform: scale(0); opacity: 0; pointer-events: none; }
+
+        /* --- Menu Panel --- */
+        .menu-overlay { position: fixed; inset:0; background: transparent; z-index: 199; display: none; }
+        .menu-overlay.active { display: block; }
+        .menu-panel {
+            position: absolute; top: 70px; right: 20px; width: 320px; max-height: 80vh; overflow-y: auto;
+            background-color: var(--surface-variant); backdrop-filter: blur(10px); border-radius: 28px; padding: 24px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.15); z-index: 200;
+            opacity: 0; transform: scale(0.9) translateY(-10px); transform-origin: top right; visibility: hidden;
+            transition: opacity 0.4s var(--easing-entrance), transform 0.4s var(--easing-entrance), visibility 0s 0.4s;
+        }
+        .menu-panel.active { opacity: 1; transform: scale(1) translateY(0); visibility: visible; transition: opacity 0.4s var(--easing-entrance), transform 0.4s var(--easing-entrance), visibility 0s 0s; }
+        .menu-section { margin-bottom: 24px; opacity: 0; transform: translateY(15px); transition: opacity 0.5s var(--easing-entrance), transform 0.5s var(--easing-entrance); }
+        .menu-section:last-child { margin-bottom: 0; }
+        .menu-section.visible { opacity: 1; transform: translateY(0); }
+        .menu-label { font-size: 14px; font-weight: 500; color: var(--outline); margin-bottom: 12px; display: block; }
+        .menu-separator { height: 1px; background-color: var(--outline-variant); margin: 16px 0; opacity: 0.5; }
+        
+        /* New Credits Style */
+        .menu-credits {
+            font-size: 10px;
+            color: var(--outline); /* Uses theme color variables for a subtle tint */
+            text-align: center;
+            opacity: 0.8;
+            font-weight: 400;
+            line-height: 1.4;
+        }
+
+        /* Share & Theme */
+        .share-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+        .share-item { display: flex; flex-direction: column; align-items: center; gap: 6px; background: transparent; color: var(--on-surface); cursor: pointer; }
+        .share-icon-box { width: 48px; height: 48px; border-radius: 50%; background-color: var(--surface); display: flex; align-items: center; justify-content: center; transition: background-color 0.2s; }
+        .share-item:hover .share-icon-box { background-color: var(--primary-container); color: var(--on-primary-container); }
+        .share-text { font-size: 11px; color: var(--on-surface); opacity: 0.8; }
+        .theme-row { display: flex; gap: 8px; justify-content: space-between; }
+        .theme-btn { width: 48px; height: 48px; border-radius: 50%; border: 2px solid transparent; cursor: pointer; position: relative; flex-shrink: 0; }
+        .theme-btn.active { border-color: var(--on-surface); }
+        .theme-btn::after { content: ''; position: absolute; inset: 4px; border-radius: 50%; background-color: var(--theme-color); }
+        .slider-container { position: relative; width: 100%; height: 48px; background-color: var(--surface); border-radius: 24px; overflow: hidden; display: flex; align-items: center; }
+        .slider-fill { position: absolute; left: 0; top: 0; bottom: 0; background-color: var(--primary-container); width: 50%; z-index: 1; transition: none; }
+        .slider-fill.animated { transition: width 0.3s var(--easing-entrance); }
+        .slider-input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; z-index: 3; margin: 0; touch-action: manipulation; }
+        .slider-icon { position: absolute; left: 16px; z-index: 2; color: var(--on-surface); pointer-events: none; }
+        .slider-value { position: absolute; right: 16px; z-index: 2; font-size: 14px; font-weight: 500; color: var(--on-surface); pointer-events: none; }
+        .action-btn { width: 100%; height: 48px; border-radius: 24px; border: none; font-size: 15px; font-weight: 500; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px; background-color: var(--surface); color: var(--error); transition: background-color 0.2s; }
+        .action-btn:hover { background-color: var(--error-container); color: var(--on-error-container); }
+        .lang-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+        .lang-btn { height: 40px; border-radius: 12px; border: 1px solid var(--outline); background: transparent; color: var(--on-surface); font-size: 13px; font-weight: 500; cursor: pointer; transition: all 0.2s; }
+        .lang-btn:hover { background-color: var(--surface); }
+        .lang-btn.active { background-color: var(--secondary-container); color: var(--on-secondary-container); border-color: transparent; }
+
+        /* Sheets */
+        .sheet-overlay { position: fixed; inset: 0; background-color: rgba(0,0,0,0.4); z-index: 100; opacity: 0; visibility: hidden; transition: opacity 0.5s ease, visibility 0s 0.5s; backdrop-filter: blur(4px); }
+        .sheet-overlay.active { opacity: 1; visibility: visible; transition: opacity 0.5s ease, visibility 0s 0s; }
+        
+        .bottom-sheet { 
+            position: fixed; background: linear-gradient(180deg, var(--surface), #fff); z-index: 101; 
+            display: flex; flex-direction: column; transition: transform 0.5s var(--easing-entrance); 
+            box-shadow: 0 4px 30px rgba(0,0,0,0.2); overflow: hidden; 
+        }
+
+        @media (max-width: 768px) {
+            .bottom-sheet {
+                bottom: 0; left: 50%; transform: translateX(-50%) translateY(100%); 
+                width: 100%; max-width: 640px; height: 75vh; 
+                border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+            }
+            .bottom-sheet.active { transform: translateX(-50%) translateY(0); }
+            .sheet-handle { width:32px; height:4px; background-color:var(--outline-variant); border-radius:2px; margin:16px auto; flex-shrink: 0;}
+        }
+
+        @media (min-width: 769px) {
+            .bottom-sheet {
+                top: 24px; bottom: 24px; left: 24px;
+                width: 380px; height: auto;
+                border-radius: 28px;
+                border: 1px solid var(--outline-variant);
+                box-shadow: 4px 4px 24px rgba(0,0,0,0.12);
+                transform: translateX(calc(-100% - 40px));
+            }
+            .bottom-sheet.active { transform: translateX(0); }
+            .sheet-handle { display: none; }
+        }
+        
+        .sheet-title{padding:20px 24px 16px;font-size:22px;font-weight:500;color:var(--on-surface);border-bottom:1px solid var(--outline-variant);z-index:2; display: flex; justify-content: space-between; align-items: center;}
+        .sheet-list{flex:1;overflow-y:auto;padding:12px 0;position:relative}
+        
+        /* List Items */
+        .list-item{ display:flex; align-items:center; width:100%; padding:14px 24px; background:transparent; color:var(--on-surface); font-size:16px; text-align:left; justify-content:space-between; border-left:4px solid transparent; opacity: 0; transform: translateY(20px); transition: transform 0.8s var(--easing-entrance), opacity 0.8s var(--easing-entrance), background-color 0.2s; }
+        .list-item.visible{ opacity: 1; transform: translateY(0); }
+        .list-item:hover{background-color:rgba(0,0,0,0.05)}
+        .list-item:focus-visible{background-color:rgba(0,0,0,0.05); border-left-color: var(--outline);}
+        .list-item.active{background-color:var(--secondary-container);color:var(--on-secondary-container);font-weight:500;border-left:4px solid var(--primary);padding-left:20px}
+        
+        .bookmark-num {
+            font-family: 'Roboto', sans-serif; font-weight: 700; font-size: 16px; color: var(--primary);
+            min-width: 24px; margin-right: 12px; display: flex; align-items: center; justify-content: center;
+        }
+
+        .bookmark-meta { font-size: 12px; color: var(--outline); display: block; margin-top: 4px; }
+        .btn-delete { width: 32px; height: 32px; border-radius: 50%; border: none; background: transparent; color: var(--outline); display: flex; align-items: center; justify-content: center; opacity: 0.6; cursor: pointer;}
+        .btn-delete:hover { background-color: var(--error-container); color: var(--on-error-container); opacity: 1; }
+
+        /* --- Export & Import Section --- */
+        .export-section { padding: 16px 24px 24px; border-top: 1px solid var(--outline-variant); background: var(--surface); display:none; }
+        .export-header { font-size: 13px; font-weight: 500; color: var(--outline); margin-bottom: 12px; letter-spacing: 0.5px; text-transform: uppercase;}
+        
+        .export-grid { 
+            display: flex; 
+            flex-wrap: wrap; 
+            gap: 10px; 
+            margin-bottom: 12px; 
+        }
+        
+        .chip-btn {
+            flex: 1 0 28%;
+            min-width: 90px;
+            height: 48px; 
+            border-radius: 14px; border: none;
+            background-color: var(--secondary-container); color: var(--on-secondary-container);
+            font-size: 13px; font-weight: 500; cursor: pointer; transition: 0.2s;
+            display: flex; 
+            flex-direction: row;
+            align-items: center; justify-content: center;
+            gap: 6px;
+        }
+        .chip-btn:hover { background-color: var(--primary-container); color: var(--on-primary-container); box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+        .chip-btn .material-symbols-rounded { font-size: 20px; }
+        
+        .import-btn { 
+            width: 100%; height: 48px; border-radius: 24px; border: none; 
+            background-color: var(--secondary-container); color: var(--on-secondary-container);
+            font-size: 14px; font-weight: 500; cursor: pointer; display: flex; align-items: center; justify-content: center; 
+            gap: 8px; transition: 0.2s; 
+        }
+        .import-btn:hover { background-color: var(--primary-container); color: var(--on-primary-container); box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+
+        .material-symbols-rounded { font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24; }
+    </style>
+</head>
+<body>
+
+    <header>
+        <div class="app-title" id="book-title" data-i18n="appTitle">Epub Reader</div>
+        <button class="icon-btn" onclick="toggleMenu()" title="Settings" aria-label="Settings" aria-expanded="false" id="menu-btn">
+            <span class="material-symbols-rounded">more_vert</span>
+        </button>
+    </header>
+
+    <div class="menu-overlay" id="menu-overlay" onclick="toggleMenu()" aria-hidden="true"></div>
+    <div class="menu-panel" id="menu-panel" aria-hidden="true" role="dialog" aria-modal="true" aria-label="Settings Menu">
+        
+        <div class="menu-section">
+            <span class="menu-label" data-i18n="menuShare">分享</span>
+            <div class="share-grid">
+                <div class="share-item" onclick="shareAction('copy')" tabindex="0" role="button" aria-label="Copy Link" onkeydown="handleEnter(event)">
+                    <div class="share-icon-box"><span class="material-symbols-rounded">file_copy</span></div>
+                    <span class="share-text" data-i18n="shareCopy">副本</span>
+                </div>
+                <div class="share-item" onclick="shareAction('email')" tabindex="0" role="button" aria-label="Share via Email" onkeydown="handleEnter(event)">
+                    <div class="share-icon-box"><span class="material-symbols-rounded">mail</span></div>
+                    <span class="share-text" data-i18n="shareEmail">邮件</span>
+                </div>
+                <div class="share-item" onclick="shareAction('x')" tabindex="0" role="button" aria-label="Share on X" onkeydown="handleEnter(event)">
+                    <div class="share-icon-box" style="font-weight:bold; font-size:18px;">X</div>
+                    <span class="share-text">Twitter</span>
+                </div>
+                <div class="share-item" onclick="shareAction('line')" tabindex="0" role="button" aria-label="Share on LINE" onkeydown="handleEnter(event)">
+                    <div class="share-icon-box" style="font-weight:bold; font-size:14px;">LINE</div>
+                    <span class="share-text">LINE</span>
+                </div>
+            </div>
+        </div>
+        <div class="menu-separator"></div>
+
+        <div class="menu-section">
+            <span class="menu-label" data-i18n="menuTheme">主题风格</span>
+            <div class="theme-row" role="radiogroup" aria-label="Color Theme">
+                <div class="theme-btn active" onclick="setTheme('purple')" style="--theme-color: #6750a4;" title="Purple" tabindex="0" role="radio" aria-checked="true" aria-label="Purple Theme" onkeydown="handleEnter(event)"></div>
+                <div class="theme-btn" onclick="setTheme('blue')" style="--theme-color: #00639b;" title="Blue" tabindex="0" role="radio" aria-checked="false" aria-label="Blue Theme" onkeydown="handleEnter(event)"></div>
+                <div class="theme-btn" onclick="setTheme('green')" style="--theme-color: #006d42;" title="Green" tabindex="0" role="radio" aria-checked="false" aria-label="Green Theme" onkeydown="handleEnter(event)"></div>
+                <div class="theme-btn" onclick="setTheme('brown')" style="--theme-color: #895100;" title="Brown" tabindex="0" role="radio" aria-checked="false" aria-label="Brown Theme" onkeydown="handleEnter(event)"></div>
+                <div class="theme-btn" onclick="setTheme('pink')" style="--theme-color: #bc004b;" title="Pink" tabindex="0" role="radio" aria-checked="false" aria-label="Pink Theme" onkeydown="handleEnter(event)"></div>
+            </div>
+        </div>
+        <div class="menu-separator"></div>
+
+        <div class="menu-section">
+            <span class="menu-label" data-i18n="menuFontSize">字号大小</span>
+            <div class="slider-container" id="slider-container">
+                <div class="slider-fill" id="font-fill"></div>
+                <span class="material-symbols-rounded slider-icon">format_size</span>
+                <span class="slider-value" id="font-val">100%</span>
+                <input type="range" min="60" max="180" value="100" class="slider-input" id="font-slider" oninput="updateFontSize(this.value)" aria-label="Font Size Control">
+            </div>
+        </div>
+        <div class="menu-separator"></div>
+
+        <div class="menu-section">
+            <span class="menu-label" data-i18n="menuActions">操作</span>
+            <button class="action-btn" onclick="closeBook()">
+                <span class="material-symbols-rounded">close</span>
+                <span data-i18n="actionClose">关闭书籍</span>
+            </button>
+        </div>
+        <div class="menu-separator"></div>
+        
+        <div class="menu-section">
+            <span class="menu-label" data-i18n="menuLanguage">语言</span>
+            <div class="lang-grid">
+                <button class="lang-btn active" onclick="changeLanguage('zh-CN')" id="lang-zh-CN" aria-pressed="true">简体中文</button>
+                <button class="lang-btn" onclick="changeLanguage('zh-TW')" id="lang-zh-TW" aria-pressed="false">繁體中文</button>
+                <button class="lang-btn" onclick="changeLanguage('en')" id="lang-en" aria-pressed="false">English</button>
+                <button class="lang-btn" onclick="changeLanguage('ja')" id="lang-ja" aria-pressed="false">日本語</button>
+            </div>
+        </div>
+        
+        <div class="menu-separator"></div>
+        <div class="menu-section" style="margin-bottom: 0;">
+            <div class="menu-credits">
+                ©️2026 Designed By Gemini & Tsukinoki_Ryo in California. Version 1.0.0
+            </div>
+        </div>
+
+    </div>
+
+    <main>
+        <div id="viewer"></div>
+        <div class="nav-fade-overlay" id="nav-fade-overlay"></div>
+        <div class="empty-state" id="empty-state">
+            <span class="material-symbols-rounded" style="font-size: 64px; opacity:0.5;">menu_book</span>
+            <div data-i18n="emptyState" style="margin-top:16px;">请选择一个 EPUB 文件开始阅读</div>
+        </div>
+        <div class="loading-indicator" id="loading-indicator" data-i18n="loading" role="status" aria-live="polite">正在加载书籍...</div>
+    </main>
+
+    <footer>
+        <button class="material-chip nav-chip" id="prev-btn" disabled aria-label="Previous Page">
+            <span class="material-symbols-rounded">arrow_back</span>
+        </button>
+
+        <button class="material-chip progress-chip" id="progress-btn" onclick="toggleToc()" disabled aria-label="Table of Contents">
+            <span class="text" id="progress-text">--%</span>
+            <span class="material-symbols-rounded" style="font-size: 18px;">expand_less</span>
+        </button>
+
+        <button class="material-chip nav-chip bookmark-btn" id="bookmark-btn" disabled aria-label="Add Bookmark">
+            <span class="material-symbols-rounded" id="bookmark-icon">bookmark_add</span>
+        </button>
+
+        <button class="material-chip nav-chip" id="next-btn" disabled aria-label="Next Page">
+            <span class="material-symbols-rounded">arrow_forward</span>
+        </button>
+    </footer>
+
+    <button class="fab" onclick="document.getElementById('file-input').click()" aria-label="Open File">
+        <span class="material-symbols-rounded">add</span>
+        <span data-i18n="btnOpen">打开书籍</span>
+    </button>
+    
+    <input type="file" id="file-input" accept=".epub" style="display: none">
+    <input type="file" id="import-input" accept=".backup" style="display: none">
+    
+    <div class="sheet-overlay" id="sheet-overlay" onclick="closeAllSheets()" aria-hidden="true"></div>
+    
+    <div class="bottom-sheet" id="toc-sheet" aria-hidden="true" role="dialog" aria-modal="true" aria-label="Table of Contents">
+        <div class="sheet-handle"></div>
+        <div class="sheet-title">
+            <span data-i18n="tocTitle">章节目录</span>
+        </div>
+        <div class="sheet-list" id="chapter-list"></div>
+    </div>
+
+    <div class="bottom-sheet" id="bookmark-sheet" aria-hidden="true" role="dialog" aria-modal="true" aria-label="Bookmarks">
+        <div class="sheet-handle"></div>
+        <div class="sheet-title">
+            <span data-i18n="bookmarksTitle">书签</span>
+        </div>
+        <div class="sheet-list" id="bookmark-list-container"></div>
+        
+        <div class="export-section" id="export-ui">
+            <div class="export-header" data-i18n="dataManage">数据管理</div>
+            <div class="export-grid">
+                <button class="chip-btn" onclick="exportAsJSON()">
+                    <span class="material-symbols-rounded">data_object</span> JSON
+                </button>
+                <button class="chip-btn" onclick="exportAsTXT()">
+                    <span class="material-symbols-rounded">description</span> TXT
+                </button>
+                <button class="chip-btn" onclick="exportAsBackup()">
+                    <span class="material-symbols-rounded">save</span> <span data-i18n="btnBackup">导出备份</span>
+                </button>
+            </div>
+            <button class="import-btn" onclick="triggerImport()">
+                <span class="material-symbols-rounded">upload_file</span> <span data-i18n="btnImport">导入备份</span>
+            </button>
+        </div>
+    </div>
+
+    <script>
+        // DOM Elements
+        const el = (id) => document.getElementById(id);
+        const viewer = el('viewer'), emptyState = el('empty-state'), loadingIndicator = el('loading-indicator');
+        const bookTitle = el('book-title'), prevBtn = el('prev-btn'), nextBtn = el('next-btn');
+        const progressBtn = el('progress-btn'), progressText = el('progress-text');
+        const tocSheet = el('toc-sheet'), sheetOverlay = el('sheet-overlay'), chapterList = el('chapter-list'), navFade = el('nav-fade-overlay');
+        const menuPanel = el('menu-panel'), menuOverlay = el('menu-overlay'), fontFill = el('font-fill'), fontVal = el('font-val'), fontSlider = el('font-slider'), sliderContainer = el('slider-container');
+        const fileInput = el('file-input'), importInput = el('import-input');
+        const fab = document.querySelector('.fab'), exportUI = el('export-ui');
+        const menuBtn = el('menu-btn');
+        
+        // Bookmark Elements
+        const bookmarkBtn = el('bookmark-btn'), bookmarkSheet = el('bookmark-sheet'), bookmarkListContainer = el('bookmark-list-container'), bookmarkIcon = el('bookmark-icon');
+
+        let book = null, rendition = null, flatToc = [], tocCfiMap = {}, isLocationsReady = false;
+        let currentFontSize = 100, currentFileObj = null;
+        let currentLang = 'zh-CN';
+        let bookmarks = []; 
+        let currentBookKey = '';
+        let lastFocusedElement = null; // A11y focus management
+
+        // Internationalization
+        const i18n = {
+            'zh-CN': {
+                appTitle: 'Epub Reader', menuActions: '操作', actionClose: '关闭书籍', menuLanguage: '语言', menuShare: '分享', menuTheme: '主题风格', menuFontSize: '字号大小',
+                shareCopy: '副本', shareEmail: '邮件', emptyState: '请选择一个 EPUB 文件开始阅读', loading: '正在加载书籍...', btnOpen: '打开书籍', tocTitle: '章节目录',
+                error: '错误: ', copySuccess: '已复制书名', unknownLabel: '(未命名)', bookmarksTitle: '书签', emptyBookmarks: '暂无书签', renamePrompt: '重命名书签:',
+                pagePrefix: '第 ', pageSuffix: ' 页', dataManage: '数据管理', btnBackup: '导出备份', btnImport: '导入备份',
+                msgImportSuccess: '成功导入书签: ', msgImportError: '文件格式错误', msgImportFailed: '导入失败: '
+            },
+            'zh-TW': {
+                appTitle: 'Epub Reader', menuActions: '操作', actionClose: '關閉書籍', menuLanguage: '語言', menuShare: '分享', menuTheme: '主題風格', menuFontSize: '字型大小',
+                shareCopy: '副本', shareEmail: '郵件', emptyState: '請選擇一個 EPUB 檔案開始閱讀', loading: '正在載入書籍...', btnOpen: '開啟書籍', tocTitle: '章節目錄',
+                error: '錯誤: ', copySuccess: '已複製書名', unknownLabel: '(未命名)', bookmarksTitle: '書籤', emptyBookmarks: '暫無書籤', renamePrompt: '重新命名書籤:',
+                pagePrefix: '第 ', pageSuffix: ' 頁', dataManage: '數據管理', btnBackup: '匯出備份', btnImport: '匯入備份',
+                msgImportSuccess: '成功匯入書籤: ', msgImportError: '文件格式錯誤', msgImportFailed: '匯入失敗: '
+            },
+            'en': {
+                appTitle: 'Epub Reader', menuActions: 'Actions', actionClose: 'Close Book', menuLanguage: 'Language', menuShare: 'Share', menuTheme: 'Theme', menuFontSize: 'Font Size',
+                shareCopy: 'Copy', shareEmail: 'Email', emptyState: 'Select an EPUB file to start reading', loading: 'Loading book...', btnOpen: 'Open Book', tocTitle: 'Table of Contents',
+                error: 'Error: ', copySuccess: 'Title copied', unknownLabel: '(Untitled)', bookmarksTitle: 'Bookmarks', emptyBookmarks: 'No bookmarks', renamePrompt: 'Rename bookmark:',
+                pagePrefix: 'Page ', pageSuffix: '', dataManage: 'Data', btnBackup: 'Backup File', btnImport: 'Import Backup',
+                msgImportSuccess: 'Imported bookmarks: ', msgImportError: 'Invalid file format', msgImportFailed: 'Import failed: '
+            },
+            'ja': {
+                appTitle: 'Epub Reader', menuActions: '操作', actionClose: '本を閉じる', menuLanguage: '言語', menuShare: '共有', menuTheme: 'テーマ', menuFontSize: '文字サイズ',
+                shareCopy: 'コピー', shareEmail: 'メール', emptyState: 'EPUBファイルを選択してください', loading: '読み込み中...', btnOpen: '本を開く', tocTitle: '目次',
+                error: 'エラー: ', copySuccess: 'タイトルをコピーしました', unknownLabel: '(無題)', bookmarksTitle: 'しおり', emptyBookmarks: 'しおりはありません', renamePrompt: 'しおりの名前を変更:',
+                pagePrefix: '', pageSuffix: 'ページ', dataManage: 'データ管理', btnBackup: 'バックアップ', btnImport: 'バックアップを復元',
+                msgImportSuccess: 'しおりをインポートしました: ', msgImportError: 'ファイル形式が無効です', msgImportFailed: 'インポートに失敗しました: '
+            }
+        };
+
+        const themes = {
+            purple: { '--primary': '#6750a4', '--on-primary': '#ffffff', '--primary-container': '#eaddff', '--on-primary-container': '#21005d', '--secondary-container': '#e8def8', '--on-secondary-container': '#1d192b', '--surface-variant': '#e7e0ec', '--outline': '#79747e' },
+            blue: { '--primary': '#00639b', '--on-primary': '#ffffff', '--primary-container': '#cce5ff', '--on-primary-container': '#001d33', '--secondary-container': '#dbe4f0', '--on-secondary-container': '#101c2b', '--surface-variant': '#dfe2eb', '--outline': '#72777f' },
+            green: { '--primary': '#006d42', '--on-primary': '#ffffff', '--primary-container': '#95f7bc', '--on-primary-container': '#002111', '--secondary-container': '#d9e5db', '--on-secondary-container': '#121d17', '--surface-variant': '#dfe9e0', '--outline': '#717973' },
+            brown: { '--primary': '#895100', '--on-primary': '#ffffff', '--primary-container': '#ffdcbe', '--on-primary-container': '#2c1600', '--secondary-container': '#ebdccf', '--on-secondary-container': '#27180d', '--surface-variant': '#f2dfd1', '--outline': '#81756a' },
+            pink: { '--primary': '#bc004b', '--on-primary': '#ffffff', '--primary-container': '#ffd9e2', '--on-primary-container': '#400014', '--secondary-container': '#ffd8e4', '--on-secondary-container': '#30111d', '--surface-variant': '#f2dde1', '--outline': '#857377' }
+        };
+
+        if (typeof ePub === 'undefined') alert('EPUB.js Library Missing');
+
+        fileInput.addEventListener('change', function(e) { 
+            const file = e.target.files[0]; 
+            if (file && file.name.toLowerCase().endsWith('.epub')) { 
+                currentFileObj = file; 
+                loadBook(file); 
+            } 
+            this.value = ''; 
+        });
+
+        // --- A11y Helpers ---
+        function handleEnter(e) {
+            if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                e.target.click();
+            }
+        }
+
+        // --- Core Functions ---
+
+        function changeLanguage(lang) {
+            currentLang = lang;
+            const t = i18n[lang];
+
+            document.querySelectorAll('[data-i18n]').forEach(el => {
+                const key = el.getAttribute('data-i18n');
+                if (el.id === 'book-title' && book) return;
+                if (t[key]) el.innerHTML = t[key]; 
+            });
+
+            document.querySelectorAll('.lang-btn').forEach(btn => {
+                btn.classList.remove('active');
+                btn.setAttribute('aria-pressed', 'false');
+            });
+            const activeLangBtn = el(`lang-${lang}`);
+            if(activeLangBtn) {
+                activeLangBtn.classList.add('active');
+                activeLangBtn.setAttribute('aria-pressed', 'true');
+            }
+
+            if (book) {
+                 book.loaded.navigation.then(nav => { renderToc(nav.toc || []); });
+            } else {
+                bookTitle.textContent = t.appTitle;
+                document.title = t.appTitle; // Update tab title
+            }
+            if (bookmarkSheet.classList.contains('active')) renderBookmarks();
+        }
+
+        function closeBook() {
+            toggleMenu();
+            viewer.style.opacity = '0';
+            
+            setTimeout(() => {
+                if (book) {
+                    try { book.destroy(); } catch(e){}
+                    book = null; rendition = null;
+                }
+                viewer.innerHTML = '';
+                
+                flatToc = []; tocCfiMap = {}; isLocationsReady = false; currentFileObj = null; bookmarks = []; currentBookKey = '';
+                
+                emptyState.style.display = 'flex';
+                // Reset title
+                const defaultTitle = i18n[currentLang].appTitle;
+                bookTitle.textContent = defaultTitle;
+                document.title = defaultTitle;
+
+                progressText.textContent = '--%';
+                progressBtn.setAttribute('aria-label', i18n[currentLang].tocTitle);
+                chapterList.innerHTML = '';
+                bookmarkListContainer.innerHTML = '';
+                
+                prevBtn.disabled = true; nextBtn.disabled = true; progressBtn.disabled = true; bookmarkBtn.disabled = true;
+                bookmarkBtn.classList.remove('active');
+                bookmarkIcon.textContent = 'bookmark_add';
+                fab.classList.remove('hidden');
+                exportUI.style.display = 'none';
+
+                updateFontSize(100, true);
+                fontSlider.value = 100;
+            }, 400);
+        }
+
+        function loadBook(fileData) {
+            emptyState.style.display = 'none'; 
+            loadingIndicator.style.display = 'block'; 
+            loadingIndicator.textContent = i18n[currentLang].loading;
+            viewer.style.opacity = '1';
+            
+            flatToc = []; tocCfiMap = {}; isLocationsReady = false; progressText.textContent = i18n[currentLang].loading;
+            
+            const defaultBookName = fileData.name;
+            bookTitle.textContent = defaultBookName; 
+            document.title = defaultBookName; // Temp title
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const bookData = e.target.result;
+                try {
+                    if (book) { try { book.destroy(); } catch(e){} viewer.innerHTML = ''; }
+                    book = ePub(bookData);
+                    
+                    book.loaded.metadata.then(meta => { 
+                        const safeTitle = meta.title || defaultBookName;
+                        bookTitle.textContent = safeTitle;
+                        document.title = safeTitle; // Set Tab Title
+                        const sizeSuffix = currentFileObj ? `_${currentFileObj.size}` : '';
+                        currentBookKey = 'epub_bookmarks_' + safeTitle.replace(/\s+/g, '_') + sizeSuffix;
+                        loadBookmarks();
+                    });
+
+                    rendition = book.renderTo("viewer", { width: "100%", height: "100%", flow: "paginated", manager: "default" });
+                    rendition.themes.fontSize(currentFontSize + "%");
+                    rendition.on('rendered', (section, view) => { mapTocToCfi(section, view); attachInternalLinkHandler(section, view); });
+                    
+                    const originalDisplay = rendition.display.bind(rendition);
+                    rendition.display = function(href) {
+                        try { navFade.classList.add('active'); } catch(e) {}
+                        const p = originalDisplay(href);
+                        p.then(() => setTimeout(() => navFade.classList.remove('active'), 300)).catch(() => setTimeout(() => navFade.classList.remove('active'), 100));
+                        return p;
+                    };
+                    rendition.on('relocated', function(location){ 
+                        updateProgressUI(location); 
+                        checkBookmarkStatus(location);
+                        setTimeout(() => { try { navFade.classList.remove('active'); } catch(e) {} }, 300); 
+                    });
+                    
+                    rendition.display().then(() => {
+                        loadingIndicator.style.display = 'none'; viewer.style.opacity = '1'; 
+                        prevBtn.disabled = false; nextBtn.disabled = false; progressBtn.disabled = false; bookmarkBtn.disabled = false;
+                        fab.classList.add('hidden');
+                        if (bookmarks.length > 0) exportUI.style.display = 'block';
+                    }).catch(err => { console.error('Render error', err); handleError(err); });
+
+                    book.ready.then(() => book.locations.generate(1000)).then(() => { isLocationsReady = true; const loc = rendition.currentLocation(); if (loc) updateProgressUI(loc); });
+                    book.loaded.navigation.then(nav => { renderToc(nav.toc || []); try { processTocData(nav.toc || []); } catch(e) { console.warn(e); } });
+                    
+                } catch (error) { handleError(error); }
+            };
+            reader.readAsArrayBuffer(fileData);
+        }
+
+        // Global Keyboard Listeners
+        document.onkeyup = function(e) { 
+            if (!book) return;
+            if (e.key === "ArrowLeft") prevBtn.click(); 
+            if (e.key === "ArrowRight") nextBtn.click();
+            if (e.key === "Escape") {
+                if (menuPanel.classList.contains('active')) toggleMenu();
+                closeAllSheets();
+            }
+        };
+
+        function handleError(err) { 
+            console.error(err); 
+            loadingIndicator.style.display = 'none'; 
+            emptyState.style.display = 'flex'; 
+            alert(i18n[currentLang].error + err); 
+        }
+
+        /* --- UI Logic --- */
+
+        function toggleMenu() {
+            const isActive = menuPanel.classList.contains('active');
+            const sections = document.querySelectorAll('.menu-section');
+            if (isActive) {
+                // Close Menu
+                sections.forEach(s => { s.style.transitionDelay = '0ms'; s.classList.remove('visible'); });
+                setTimeout(() => { 
+                    menuPanel.classList.remove('active'); 
+                    menuOverlay.classList.remove('active');
+                    menuPanel.setAttribute('aria-hidden', 'true');
+                    menuBtn.setAttribute('aria-expanded', 'false');
+                    
+                    if (lastFocusedElement) lastFocusedElement.focus();
+                }, 100);
+            } else {
+                // Open Menu
+                lastFocusedElement = document.activeElement;
+                closeAllSheets();
+                menuOverlay.classList.add('active');
+                setTimeout(() => menuPanel.classList.add('active'), 10);
+                menuPanel.setAttribute('aria-hidden', 'false');
+                menuBtn.setAttribute('aria-expanded', 'true');
+
+                sections.forEach((s, i) => { s.classList.remove('visible'); s.style.transitionDelay = `${i * 60 + 100}ms`; });
+                setTimeout(() => sections.forEach(s => s.classList.add('visible')), 50);
+                
+                // Focus Steering
+                setTimeout(() => {
+                    const first = menuPanel.querySelector('button, [href], input, [tabindex="0"]');
+                    if(first) first.focus();
+                }, 100);
+            }
+        }
+
+        function shareAction(type) {
+            const url = window.location.href; const text = `Reading: ${bookTitle.textContent}`;
+            if (type === 'copy') {
+                if (navigator.share && currentFileObj) { navigator.share({ files: [currentFileObj], title: bookTitle.textContent, text: 'Share EPUB' }).catch(console.warn); }
+                else { alert(i18n[currentLang].copySuccess); navigator.clipboard.writeText(bookTitle.textContent); }
+            } else if (type === 'email') window.location.href = `mailto:?subject=${encodeURIComponent(bookTitle.textContent)}&body=${encodeURIComponent("Check this book out.")}`;
+            else if (type === 'x') window.open(`https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}`, '_blank');
+            else if (type === 'line') window.open(`https://social-plugins.line.me/lineit/share?url=${encodeURIComponent(url)}`, '_blank');
+            toggleMenu();
+        }
+
+        function setTheme(themeName) {
+            const theme = themes[themeName]; if (!theme) return;
+            const root = document.documentElement;
+            for (const [key, value] of Object.entries(theme)) root.style.setProperty(key, value);
+            
+            document.querySelectorAll('.theme-btn').forEach(btn => {
+                btn.classList.remove('active');
+                btn.setAttribute('aria-checked', 'false');
+            });
+            const clickedBtn = document.querySelector(`.theme-btn[onclick*="${themeName}"]`);
+            if (clickedBtn) {
+                clickedBtn.classList.add('active');
+                clickedBtn.setAttribute('aria-checked', 'true');
+                clickedBtn.focus();
+            }
+        }
+
+        function updateFontSize(val, animate = false) {
+            currentFontSize = val; fontVal.textContent = val + '%';
+            const min = 60, max = 180; const percent = ((val - min) / (max - min)) * 100;
+            if (animate) fontFill.classList.add('animated'); else fontFill.classList.remove('animated');
+            fontFill.style.width = percent + '%';
+            if (rendition) rendition.themes.fontSize(val + "%");
+        }
+        sliderContainer.addEventListener('dblclick', () => { fontSlider.value = 100; updateFontSize(100, true); });
+
+        /* --- Bookmark Logic --- */
+
+        let longPressTimer;
+        let isLongPress = false;
+
+        const startPress = (e) => {
+            if (bookmarkBtn.disabled) return;
+            isLongPress = false; 
+            longPressTimer = setTimeout(() => {
+                isLongPress = true; 
+                if (navigator.vibrate) navigator.vibrate(50); 
+                openBookmarkSheet(); 
+            }, 500); 
+        };
+
+        const cancelPress = () => {
+            clearTimeout(longPressTimer);
+        };
+
+        bookmarkBtn.addEventListener('touchstart', startPress, {passive: true});
+        bookmarkBtn.addEventListener('touchend', cancelPress);
+        bookmarkBtn.addEventListener('touchmove', cancelPress);
+        bookmarkBtn.addEventListener('mousedown', startPress);
+        bookmarkBtn.addEventListener('mouseup', cancelPress);
+        bookmarkBtn.addEventListener('mouseleave', cancelPress);
+        
+        bookmarkBtn.oncontextmenu = (e) => {
+            e.preventDefault();
+            cancelPress(); 
+            openBookmarkSheet();
+        };
+
+        bookmarkBtn.onclick = (e) => {
+            if (isLongPress) {
+                e.preventDefault();
+                e.stopPropagation();
+                isLongPress = false; 
+                return;
+            }
+            toggleBookmark();
+        };
+
+        function loadBookmarks() {
+            try {
+                const stored = localStorage.getItem(currentBookKey);
+                bookmarks = stored ? JSON.parse(stored) : [];
+            } catch (e) { console.error('Load bookmarks failed', e); bookmarks = []; }
+        }
+
+        function saveBookmarks() {
+            try { localStorage.setItem(currentBookKey, JSON.stringify(bookmarks)); } catch(e){}
+        }
+
+        function toggleBookmark() {
+            if (!rendition) return;
+            let loc;
+            try { loc = rendition.currentLocation(); } catch(e){}
+            if (!loc || !loc.start) return;
+            
+            const cfi = loc.start.cfi;
+            const existingIndex = bookmarks.findIndex(b => b.cfi === cfi);
+
+            if (existingIndex > -1) {
+                bookmarks.splice(existingIndex, 1);
+                bookmarkBtn.classList.remove('active');
+                bookmarkIcon.textContent = 'bookmark_add';
+            } else {
+                const t = i18n[currentLang];
+                let label = `${t.pagePrefix}${loc.start.displayed.page}${t.pageSuffix}`;
+                try {
+                    const activeItem = getActiveTocItem(loc);
+                    if (activeItem) label = activeItem.label;
+                    if (isLocationsReady) {
+                        const pct = book.locations.percentageFromCfi(cfi);
+                        label = `${label} (${Math.floor(pct * 100)}%)`;
+                    }
+                } catch(e){}
+                bookmarks.push({ cfi: cfi, label: label, timestamp: Date.now() });
+                bookmarkBtn.classList.add('active');
+                bookmarkIcon.textContent = 'bookmark';
+            }
+            saveBookmarks();
+        }
+
+        function checkBookmarkStatus(location) {
+            if (!location || !location.start) return;
+            const cfi = location.start.cfi;
+            const exists = bookmarks.some(b => b.cfi === cfi);
+            if (exists) {
+                bookmarkBtn.classList.add('active');
+                bookmarkIcon.textContent = 'bookmark';
+            } else {
+                bookmarkBtn.classList.remove('active');
+                bookmarkIcon.textContent = 'bookmark_add';
+            }
+        }
+
+        function openBookmarkSheet() {
+            renderBookmarks();
+            if (menuPanel.classList.contains('active')) toggleMenu();
+            if (tocSheet.classList.contains('active')) tocSheet.classList.remove('active');
+            
+            lastFocusedElement = document.activeElement;
+            bookmarkSheet.classList.add('active');
+            bookmarkSheet.setAttribute('aria-hidden', 'false');
+            sheetOverlay.classList.add('active');
+            
+            // Focus steering
+            setTimeout(() => {
+                 const first = bookmarkSheet.querySelector('button, .list-item');
+                 if(first) first.focus();
+            }, 100);
+        }
+
+        /* --- Date Formatting --- */
+        function formatDate(timestamp) {
+            const date = new Date(timestamp);
+            if (currentLang === 'ja') {
+                try {
+                    const df = new Intl.DateTimeFormat('ja-JP-u-ca-japanese', {
+                        era: 'long', year: 'numeric', month: 'numeric', day: 'numeric',
+                        weekday: 'short', hour: 'numeric', minute: 'numeric', hour12: true
+                    });
+                    return df.format(date);
+                } catch(e) { return date.toLocaleString('ja-JP'); }
+            } 
+            else if (currentLang === 'zh-CN' || currentLang === 'zh-TW') {
+                const Y = date.getFullYear();
+                const M = date.getMonth() + 1;
+                const D = date.getDate();
+                const H = date.getHours();
+                const m = date.getMinutes().toString().padStart(2, '0');
+                const dayMap = ['日', '一', '二', '三', '四', '五', '六'];
+                const W = dayMap[date.getDay()];
+                return `${Y}年${M}月${D}日 (${W}) ${H}:${m}`;
+            } 
+            else { return date.toLocaleString(); }
+        }
+
+        function renderBookmarks() {
+            bookmarkListContainer.innerHTML = '';
+            if (exportUI) exportUI.style.display = bookmarks.length > 0 ? 'block' : 'none';
+
+            if (bookmarks.length === 0) {
+                bookmarkListContainer.innerHTML = `<div style="padding:24px; text-align:center; color:var(--outline);">${i18n[currentLang].emptyBookmarks}</div>`;
+                if (exportUI) exportUI.style.display = 'none'; 
+                return;
+            }
+            const sorted = [...bookmarks].sort((a,b) => {
+                try { return new ePub.CFI().compare(a.cfi, b.cfi); } catch(e) { return a.cfi.localeCompare(b.cfi); }
+            });
+            sorted.forEach((bm, index) => {
+                const div = document.createElement('div');
+                div.className = 'list-item'; 
+                div.setAttribute('role', 'button');
+                div.setAttribute('tabindex', '0');
+                div.style.justifyContent = 'space-between';
+                const dateStr = formatDate(bm.timestamp);
+                const numSpan = `<span class="bookmark-num">${index + 1}</span>`;
+
+                const infoDiv = document.createElement('div');
+                infoDiv.style.flex = '1'; infoDiv.style.display = 'flex'; infoDiv.style.alignItems = 'center';
+
+                infoDiv.innerHTML = `${numSpan}<div><div style="font-weight:500;">${bm.label || i18n[currentLang].unknownLabel}</div><span class="bookmark-meta">${dateStr}</span></div>`;
+                
+                let itemPressTimer;
+                const activateRename = () => itemPressTimer = setTimeout(() => renameBookmark(bm.cfi), 800);
+                const cancelRename = () => clearTimeout(itemPressTimer);
+                const clickAction = () => { if(itemPressTimer) clearTimeout(itemPressTimer); rendition.display(bm.cfi); closeAllSheets(); };
+
+                infoDiv.addEventListener('mousedown', activateRename);
+                infoDiv.addEventListener('touchstart', activateRename, {passive:true});
+                infoDiv.addEventListener('mouseup', cancelRename);
+                infoDiv.addEventListener('touchend', cancelRename);
+                infoDiv.addEventListener('click', clickAction);
+
+                // A11y Enter/Space
+                div.addEventListener('keydown', (e) => {
+                    if(e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        e.target.click();
+                    }
+                });
+
+                const delBtn = document.createElement('button');
+                delBtn.className = 'btn-delete';
+                delBtn.setAttribute('aria-label', 'Delete Bookmark');
+                delBtn.innerHTML = '<span class="material-symbols-rounded" style="font-size:20px">delete</span>';
+                delBtn.onclick = (e) => {
+                    e.stopPropagation();
+                    bookmarks = bookmarks.filter(b => b.cfi !== bm.cfi);
+                    saveBookmarks();
+                    checkBookmarkStatus(rendition.currentLocation());
+                    renderBookmarks();
+                };
+                div.appendChild(infoDiv); div.appendChild(delBtn); bookmarkListContainer.appendChild(div);
+            });
+            setTimeout(() => {
+                const items = bookmarkListContainer.querySelectorAll('.list-item');
+                items.forEach((it, idx) => { it.style.transitionDelay = `${idx * 40}ms`; it.classList.add('visible'); });
+            }, 50);
+        }
+
+        function renameBookmark(cfi) {
+            const bm = bookmarks.find(b => b.cfi === cfi);
+            if (!bm) return;
+            const newName = prompt(i18n[currentLang].renamePrompt, bm.label);
+            if (newName) { bm.label = newName; saveBookmarks(); renderBookmarks(); }
+        }
+
+        /* --- Export & Import Logic --- */
+        function exportAsJSON() {
+            if(bookmarks.length===0) return;
+            const dataStr = JSON.stringify(bookmarks, null, 2);
+            downloadFile(dataStr, 'json', 'application/json');
+            closeAllSheets();
+        }
+        function exportAsTXT() {
+            if(bookmarks.length===0) return;
+            let txt = `Bookmarks: ${bookTitle.textContent}\n\n`;
+            bookmarks.forEach((bm, i) => txt += `${i+1}. ${bm.label} (${new Date(bm.timestamp).toLocaleString()})\n`);
+            downloadFile(txt, 'txt', 'text/plain');
+            closeAllSheets();
+        }
+        function exportAsBackup() {
+            if(bookmarks.length===0) return;
+            const dataStr = JSON.stringify(bookmarks);
+            downloadFile(dataStr, 'backup', 'application/octet-stream');
+            closeAllSheets();
+        }
+        function downloadFile(content, ext, type) {
+            const a = document.createElement('a'); a.href = `data:${type};charset=utf-8,` + encodeURIComponent(content);
+            const safeTitle = bookTitle.textContent.replace(/[^a-z0-9]/gi, '_').substring(0, 20);
+            a.download = `bookmarks_${safeTitle}.${ext}`; 
+            document.body.appendChild(a); a.click(); document.body.removeChild(a);
+        }
+        
+        function triggerImport() {
+            importInput.click();
+        }
+        
+        importInput.addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if(!file) return;
+
+            if (!file.name.toLowerCase().endsWith('.backup')) {
+                alert(i18n[currentLang].msgImportError || "File type not supported. Please use .backup file.");
+                this.value = '';
+                return;
+            }
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                try {
+                    const imported = JSON.parse(e.target.result);
+                    if(Array.isArray(imported)) {
+                        let addedCount = 0;
+                        const existingCfis = new Set(bookmarks.map(b => b.cfi));
+                        imported.forEach(bm => {
+                            if(bm.cfi && !existingCfis.has(bm.cfi)) {
+                                bookmarks.push(bm);
+                                addedCount++;
+                            }
+                        });
+                        saveBookmarks();
+                        renderBookmarks();
+                        checkBookmarkStatus(rendition.currentLocation());
+                        closeAllSheets();
+                        alert(`${i18n[currentLang].msgImportSuccess} ${addedCount}`);
+                    } else {
+                        alert(i18n[currentLang].msgImportError);
+                    }
+                } catch(err) {
+                    alert(i18n[currentLang].msgImportFailed + err.message);
+                }
+            };
+            reader.readAsText(file);
+            this.value = '';
+        });
+
+        /* --- Reader Helpers --- */
+
+        function mapTocToCfi(section, view) {
+            try {
+                const currentHref = (section.href || '').split('?')[0]; const doc = view.document;
+                const sectionCandidates = flatToc.filter(item => { const itemPath = (item.href || '').split('#')[0]; return itemPath && (itemPath === currentHref || currentHref.endsWith(itemPath)); });
+                sectionCandidates.forEach(item => {
+                    try { if (tocCfiMap[item.href]) return; if (item.hash) { const el = doc.getElementById(item.hash); if (el) { const cfi = section.cfiFromElement(el); tocCfiMap[item.href] = cfi; return; } }
+                        let fallbackCfi = null; try { const firstEl = doc.body && doc.body.firstElementChild ? doc.body.firstElementChild : null; if (firstEl) fallbackCfi = section.cfiFromElement(firstEl); } catch(e) {}
+                        if (!fallbackCfi) { try { fallbackCfi = section.cfiFromRange(0); } catch(e) {} } if (fallbackCfi) tocCfiMap[item.href] = fallbackCfi;
+                    } catch (e) { }
+                });
+                setTimeout(() => { try { navFade.classList.remove('active'); } catch(e) {} }, 300);
+                const loc = rendition.currentLocation(); if (loc) updateProgressUI(loc);
+            } catch(e) { }
+        }
+
+        function attachInternalLinkHandler(section, view) {
+            try {
+                const doc = view.document; if (doc._epubInternalHandlerAttached) return; doc._epubInternalHandlerAttached = true;
+                doc.addEventListener('click', function(ev) {
+                    const a = ev.target.closest && ev.target.closest('a'); if (!a || !a.getAttribute) return;
+                    const href = a.getAttribute('href'); if (!href) return; if (/^(https?:|mailto:|tel:)/.test(href)) return;
+                    ev.preventDefault(); ev.stopPropagation();
+                    const base = (section.href || '').split('#')[0]; let target = href; if (href.startsWith('#')) target = base + href;
+                    const parts = target.split('#'); const targetFile = parts[0]; const targetHash = parts[1] || null; const currentFile = base;
+                    if (!targetFile || targetFile === currentFile) {
+                        if (targetHash) { const el = doc.getElementById(targetHash); if (el) { try { el.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch(e) { el.scrollIntoView(); } try { const cfi = section.cfiFromElement(el); tocCfiMap[currentFile + '#' + targetHash] = cfi; } catch(e){} setTimeout(() => { const loc = rendition.currentLocation(); if (loc) updateProgressUI(loc); }, 300); setTimeout(() => { try { navFade.classList.remove('active'); } catch(e) {} }, 300); return; } }
+                        try { navFade.classList.add('active'); } catch(e) {} const p = rendition.display(currentFile + (targetHash ? ('#' + targetHash) : '')); if (p && p.then) { p.then(() => setTimeout(() => navFade.classList.remove('active'), 300)); } return;
+                    }
+                    try { navFade.classList.add('active'); } catch(e) {} const p2 = rendition.display(target); if (p2 && p2.then) { p2.then(() => setTimeout(() => navFade.classList.remove('active'), 300)); }
+                }, { passive: true });
+            } catch(e) { }
+        }
+
+        function processTocData(items, parent = null) {
+            items.forEach(item => {
+                let spineIndex = -1; try { const cleanHref = (item.href || '').split('#')[0]; const spineItem = book.spine.get(cleanHref); if (spineItem) spineIndex = spineItem.index; } catch(e) {}
+                const processedItem = { ...item, parent: parent, spineIndex: spineIndex, hash: item.href && item.href.includes('#') ? item.href.split('#')[1] : null }; flatToc.push(processedItem); if (item.subitems) processTocData(item.subitems, processedItem);
+            });
+        }
+
+        function renderTocItems(items, container, level = 0, startIndexObj = {i:0}) {
+            items.forEach(chapter => {
+                const btn = document.createElement('button'); btn.className = 'list-item'; btn.style.paddingLeft = `${24 + level * 20}px`; btn.textContent = chapter.label ? chapter.label.trim() : i18n[currentLang].unknownLabel; btn.dataset.href = chapter.href; btn.dataset.index = startIndexObj.i++;
+                btn.onclick = () => { try { navFade.classList.add('active'); } catch(e) {} const p = rendition.display(chapter.href); if (p && p.then) { p.then(() => setTimeout(() => navFade.classList.remove('active'), 300)); } closeAllSheets(); };
+                container.appendChild(btn); if (chapter.subitems) renderTocItems(chapter.subitems, container, level + 1, startIndexObj);
+            });
+        }
+        function renderToc(toc) { chapterList.innerHTML = ''; renderTocItems(toc, chapterList); }
+
+        function getActiveTocItem(location) {
+            try {
+                if (!flatToc.length || !location || !location.start || !isLocationsReady) return null; const currentCfi = location.start.cfi; if (!currentCfi) return null; let pctCurrent = null; try { pctCurrent = book.locations.percentageFromCfi(currentCfi); } catch(e) { pctCurrent = null; } const currentIndex = location.start.index;
+                let candidates = flatToc.filter(item => item.spineIndex === currentIndex || (item.href && item.href.split('#')[0] && location.start && location.start.href && location.start.href.endsWith(item.href.split('#')[0])));
+                if (candidates.length === 0) return null; let best = null; let bestPct = -1;
+                candidates.forEach(item => { let mapped = tocCfiMap[item.href]; let pctItem = null; if (mapped) { try { pctItem = book.locations.percentageFromCfi(mapped); } catch(e) { pctItem = null; } } if (!pctItem) { if (!item.hash) pctItem = 0.000001; else pctItem = null; } if (pctItem !== null && pctCurrent !== null) { if (pctItem <= pctCurrent && pctItem >= bestPct) { bestPct = pctItem; best = item; } } else if (!best) { best = item; } });
+                if (!best) { best = candidates[0]; } return best;
+            } catch (e) { return null; }
+        }
+
+        function updateProgressUI(location) {
+            let percentStr = "--%"; try { if (isLocationsReady && location.start && location.start.cfi) { const pct = book.locations.percentageFromCfi(location.start.cfi); if (typeof pct === 'number') percentStr = Math.floor(pct * 100) + "%"; } } catch (e) {}
+            let titleStr = "封面/前言"; let activeHref = null; try { const activeItem = getActiveTocItem(location); if (activeItem) { let path = []; let current = activeItem; while (current) { path.unshift(current.label ? current.label.trim() : i18n[currentLang].unknownLabel); current = current.parent; } titleStr = path.join(' · '); activeHref = activeItem.href; } } catch (e) { }
+            progressText.textContent = `${titleStr} · ${percentStr}`; if (activeHref) updateTocHighlight(activeHref);
+            
+            // A11y Update
+            const a11yText = `${titleStr}, 进度 ${percentStr}`;
+            progressBtn.setAttribute('aria-label', a11yText);
+        }
+
+        function updateTocHighlight(targetHref) {
+            const buttons = chapterList.querySelectorAll('.list-item'); buttons.forEach(btn => btn.classList.remove('active')); const targetDecoded = decodeURIComponent(targetHref || '');
+            for (const btn of buttons) { const btnDecoded = decodeURIComponent(btn.dataset.href || ''); if (btnDecoded === targetDecoded) { btn.classList.add('active'); return; } }
+        }
+
+        function closeAllSheets() {
+            tocSheet.classList.remove('active');
+            tocSheet.setAttribute('aria-hidden', 'true');
+            
+            bookmarkSheet.classList.remove('active');
+            bookmarkSheet.setAttribute('aria-hidden', 'true');
+            
+            sheetOverlay.classList.remove('active');
+            
+            const items = document.querySelectorAll('.list-item');
+            items.forEach(it => { it.style.transitionDelay = '0ms'; it.classList.remove('visible'); });
+
+            // Restore focus if appropriate
+            if (lastFocusedElement && !menuPanel.classList.contains('active')) {
+                lastFocusedElement.focus();
+            }
+        }
+
+        function toggleToc() {
+            const isActive = tocSheet.classList.contains('active');
+            if (!isActive) {
+                lastFocusedElement = document.activeElement; // Remember focus
+                if (menuPanel.classList.contains('active')) toggleMenu();
+                if (bookmarkSheet.classList.contains('active')) bookmarkSheet.classList.remove('active');
+                
+                tocSheet.classList.add('active'); sheetOverlay.classList.add('active');
+                tocSheet.setAttribute('aria-hidden', 'false');
+
+                setTimeout(() => { 
+                    const activeBtn = chapterList.querySelector('.list-item.active'); 
+                    if (activeBtn) {
+                        activeBtn.scrollIntoView({ block: 'center', behavior: 'smooth' }); 
+                        activeBtn.focus();
+                    } else {
+                        const first = chapterList.querySelector('.list-item');
+                        if (first) first.focus();
+                    }
+                }, 100);
+                
+                const items = Array.from(chapterList.querySelectorAll('.list-item')); 
+                items.forEach((it, idx) => { it.classList.remove('visible'); it.style.transitionDelay = `${idx * 40}ms`; }); 
+                setTimeout(() => { items.forEach(it => it.classList.add('visible')); }, 50);
+            } else {
+                closeAllSheets();
+            }
+        }
+
+        prevBtn.addEventListener('click', () => { if (rendition) rendition.prev(); });
+        nextBtn.addEventListener('click', () => { if (rendition) rendition.next(); });
+        
+        // Initialization
+        updateFontSize(100);
+        changeLanguage('zh-CN');
+
+        window.toggleToc = toggleToc;
+        window.toggleMenu = toggleMenu;
+        window.setTheme = setTheme;
+        window.updateFontSize = updateFontSize;
+        window.shareAction = shareAction;
+        window.changeLanguage = changeLanguage;
+        window.closeBook = closeBook;
+        window.exportAsJSON = exportAsJSON;
+        window.exportAsTXT = exportAsTXT;
+        window.exportAsBackup = exportAsBackup;
+        window.triggerImport = triggerImport;
+    </script>
+</body>
+</html>
